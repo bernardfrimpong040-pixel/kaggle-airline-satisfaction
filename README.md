@@ -185,11 +185,25 @@ overlap, and blending their predictions can cancel some of them out. Three blend
 Each model's out-of-fold and test predictions are saved as soon as it finishes, so an
 interrupted run resumes without retraining finished models.
 
+### 8. Round 5: the original dataset (`scripts/07_original_data.py`)
+The competition data was generated from the public *Airline Passenger Satisfaction* dataset
+(about 130,000 real passengers). Appending its rows to training is known to hurt, so it is used
+only to build features, from the original data's own labels, never the competition's:
+
+| Feature | Idea |
+|---|---|
+| Original route rates | Smoothed share of real passengers satisfied per flight distance, and per distance and class |
+| Teacher prediction | A LightGBM trained only on the original data predicts each competition passenger |
+
+The best Round 5 LightGBM is blended (rank average) with XGBoost on the same features and the
+saved Round 4 CatBoost predictions.
+
 ## Project structure
 
 ```
 kaggle-airline-satisfaction/
 ├── data/                        # Kaggle files (not on GitHub, per competition rules)
+│   └── original/                # original public dataset, for Round 5
 ├── outputs/
 │   ├── 01_first_look.txt        # data exploration report
 │   ├── experiment_log.csv       # every run: date, CV AUC, public score, notes
@@ -201,13 +215,15 @@ kaggle-airline-satisfaction/
 │   ├── 03_check_submission.py   # 7 checks before uploading
 │   ├── 04_feature_experiments.py # Round 2: 5 feature experiments
 │   ├── 05_route_features.py     # Round 3: 4 route-feature experiments
-│   └── 06_model_blend.py        # Round 4: LightGBM + XGBoost + CatBoost blend
+│   ├── 06_model_blend.py        # Round 4: LightGBM + XGBoost + CatBoost blend
+│   └── 07_original_data.py      # Round 5: original-dataset features + blend
 ├── submissions/                 # files uploaded to Kaggle (not on GitHub)
 ├── requirements.txt             # pinned library versions
 ├── SETUP_STEP1.md               # Round 1 guide: setup, baseline, first upload
 ├── ROUND2_GUIDE.md              # Round 2 guide: feature experiments and results
 ├── ROUND3_GUIDE.md              # Round 3 guide: route features and results
-└── ROUND4_GUIDE.md              # Round 4 guide: three-model blend and results
+├── ROUND4_GUIDE.md              # Round 4 guide: three-model blend and results
+└── ROUND5_GUIDE.md              # Round 5 guide: original-dataset features
 ```
 
 ## Step-by-step guides
@@ -220,6 +236,7 @@ Each round has its own guide with the steps, the results and what was learned:
 | 2 | [ROUND2_GUIDE.md](ROUND2_GUIDE.md): feature engineering experiments | CV 0.95923, public 0.95882 |
 | 3 | [ROUND3_GUIDE.md](ROUND3_GUIDE.md): route features | CV 0.96026, public 0.95999 |
 | 4 | [ROUND4_GUIDE.md](ROUND4_GUIDE.md): three models and a blend | CV 0.96065, public 0.96025 |
+| 5 | [ROUND5_GUIDE.md](ROUND5_GUIDE.md): features from the original dataset | in progress |
 
 ## Reproducing the results
 
@@ -234,6 +251,8 @@ python scripts/03_check_submission.py
 python scripts/04_feature_experiments.py
 python scripts/05_route_features.py
 python scripts/06_model_blend.py
+# put the original dataset's CSV files into data/original/ (see ROUND5_GUIDE.md)
+python scripts/07_original_data.py
 ```
 
 All randomness is seeded (`RANDOM_SEED = 42`) and library versions are pinned in
