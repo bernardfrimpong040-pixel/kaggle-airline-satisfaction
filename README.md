@@ -1,10 +1,10 @@
 # Predicting Airline Passenger Satisfaction (Kaggle Playground S6E10)
 
-**Author:** Bernard Frimpong ([GitHub](https://github.com/bernardfrimpong040-pixel) · [LinkedIn](https://www.linkedin.com/in/bernard-frimpong-681008222))
-**Competition:** [Kaggle Playground Series, Season 6 Episode 10](https://www.kaggle.com/competitions/playground-series-s6e10), October 2026
-**Task:** Binary classification. Predict the probability that a passenger is satisfied.
-**Metric:** ROC AUC
-**Tools:** Python, pandas, scikit-learn, LightGBM
+- **Author:** Bernard Frimpong ([GitHub](https://github.com/bernardfrimpong040-pixel) · [LinkedIn](https://www.linkedin.com/in/bernard-frimpong-681008222))
+- **Competition:** [Kaggle Playground Series, Season 6 Episode 10](https://www.kaggle.com/competitions/playground-series-s6e10), October 2026
+- **Task:** Binary classification. Predict the probability that a passenger is satisfied.
+- **Metric:** ROC AUC
+- **Tools:** Python, pandas, scikit-learn, LightGBM
 
 ## Results
 
@@ -40,21 +40,21 @@ Every run is recorded automatically in `outputs/experiment_log.csv`.
 
 ## Approach
 
-**1. Look before modelling** (`scripts/01_first_look.py`)
+### 1. Look before modelling (`scripts/01_first_look.py`)
 Size, column types, missing values, target balance, satisfaction rate by group,
 and the strength of each numeric column on its own (single-column AUC).
 
-**2. Honest validation** (`scripts/02_baseline_model.py`)
+### 2. Honest validation (`scripts/02_baseline_model.py`)
 5-fold stratified cross-validation with a fixed seed. Every decision is based on
 the out-of-fold AUC, not the public leaderboard, which uses only part of the
 test set and can mislead.
 
-**3. Baseline model**
+### 3. Baseline model
 LightGBM gradient boosting, using the categorical columns directly (stored as a shared
 category type across train and test) and early stopping on each held-out fold to
 prevent overfitting. Test predictions are the average of the 5 fold models.
 
-**4. Verified submissions** (`scripts/03_check_submission.py`)
+### 4. Verified submissions (`scripts/03_check_submission.py`)
 Seven automatic checks before any upload: column names, row count, duplicate ids,
 exact id match with the test set, no missing values, probabilities in [0, 1], and
 non-constant predictions.
