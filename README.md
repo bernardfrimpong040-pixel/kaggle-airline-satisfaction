@@ -16,6 +16,10 @@
 | v2c | + passenger segment | 0.95856 ± 0.00053 | — | — |
 | v2d | + flight distance count | 0.95916 ± 0.00059 | — | — |
 | **v2e** | **+ ratings as categories** | **0.95923 ± 0.00061** | **0.95882** | **1,130 (17 Oct 2026)** |
+| v3a | Lean base: raw + distance count + ratings as categories | 0.95947 ± 0.00068 | — | — |
+| v3b | + pair counts | 0.95961 ± 0.00061 | — | — |
+| **v3c** | **+ route profile** | **0.96026 ± 0.00060** | **0.95999** | **993 (17 Oct 2026)** |
+| v3d | + route residuals | 0.96014 ± 0.00054 | — | — |
 
 Only the best experiment of each round is uploaded to Kaggle; the others are judged on CV alone.
 
@@ -25,9 +29,11 @@ Only the best experiment of each round is uploaded to Kaggle; the others are jud
 |---|---:|---:|---:|
 | v1 baseline | 0.95878 | 0.95836 | 0.00042 |
 | v2e | 0.95923 | 0.95882 | 0.00041 |
-| **Improvement** | **+0.00045** | **+0.00046** | |
+| v3c | 0.96026 | 0.95999 | 0.00027 |
+| **Total improvement** | **+0.00148** | **+0.00163** | |
 
-CV predicted the Round 2 gain almost exactly, so the 5-fold cross-validation is a trustworthy
+CV predicted each round's gain closely (Round 2: +0.00045 CV vs +0.00046 public;
+Round 3: +0.00103 CV vs +0.00117 public), so the 5-fold cross-validation is a trustworthy
 guide. Model decisions are made on CV, saving Kaggle submissions for real improvements.
 
 Public leaderboard ranks change daily as other teams submit, and the final ranking uses the
@@ -80,6 +86,23 @@ shows what that group contributed:
 - **Next round:** drop the groups that did not help and build more route features from
   flight distance.
 
+## Round 3 findings
+
+| Feature group | Change in CV AUC | Verdict |
+|---|---:|---|
+| Lean base (13 unhelpful Round 2 columns removed) | +0.00024 | Fewer columns, better score |
+| Pair counts | +0.00014 | Small gain |
+| **Route profile** | **+0.00065** | **Biggest gain of the round** |
+| Route residuals | −0.00012 | No help |
+
+- **Removing useless columns improved the model.** Columns with no new information give the
+  trees more chances to fit noise.
+- **Describing each route helped most.** Knowing what kind of passengers usually fly a route
+  (share in Business class, share travelling for business, typical ratings) adds information
+  the raw columns do not contain.
+- **Differences the model can compute itself did not help.** Route residuals are rating minus
+  route average, and the model already had both, the same lesson as Round 2's summaries.
+
 ## Approach
 
 ### 1. Look before modelling (`scripts/01_first_look.py`)
@@ -113,6 +136,18 @@ settings kept identical to the baseline so any change in score comes from the fe
 | v2d | Distance count | How many passengers share each exact flight distance (a proxy for route), built without the target so it cannot leak |
 | v2e | Ratings as categories | Each 0–5 rating treated as a category, so "0 = not answered" is not read as "one less than 1" |
 
+### 6. Round 3: route features (`scripts/05_route_features.py`)
+Round 2 showed that flight distance count, a proxy for the route, was the only feature group
+with a clear gain. Round 3 drops the groups that did not help and builds more route features.
+None of them use the target, so they cannot leak it:
+
+| Experiment | Feature group added | Idea |
+|---|---|---|
+| v3a | Lean base | Original columns + distance count + ratings as categories |
+| v3b | Pair counts | Passengers sharing the same distance *and* the same class, trip type or customer type |
+| v3c | Route profile | Per route: share of Business class, business travel and loyal customers, mean age, and mean of the 4 strongest ratings |
+| v3d | Route residuals | Each passenger's rating minus the route average, e.g. "online boarding 1.5 points below usual for this route" |
+
 ## Project structure
 
 ```
@@ -127,11 +162,13 @@ kaggle-airline-satisfaction/
 │   ├── 01_first_look.py         # data exploration
 │   ├── 02_baseline_model.py     # 5-fold CV LightGBM + submission file
 │   ├── 03_check_submission.py   # 7 checks before uploading
-│   └── 04_feature_experiments.py # Round 2: 5 feature experiments
+│   ├── 04_feature_experiments.py # Round 2: 5 feature experiments
+│   └── 05_route_features.py     # Round 3: 4 route-feature experiments
 ├── submissions/                 # files uploaded to Kaggle (not on GitHub)
 ├── requirements.txt             # pinned library versions
 ├── SETUP_STEP1.md               # Round 1 guide: setup, baseline, first upload
-└── ROUND2_GUIDE.md              # Round 2 guide: feature experiments and results
+├── ROUND2_GUIDE.md              # Round 2 guide: feature experiments and results
+└── ROUND3_GUIDE.md              # Round 3 guide: route features and results
 ```
 
 ## Step-by-step guides
@@ -142,6 +179,7 @@ Each round has its own guide with the steps, the results and what was learned:
 |---|---|---|
 | 1 | [SETUP_STEP1.md](SETUP_STEP1.md): setup, data exploration, baseline model | CV 0.95878, public 0.95836 |
 | 2 | [ROUND2_GUIDE.md](ROUND2_GUIDE.md): feature engineering experiments | CV 0.95923, public 0.95882 |
+| 3 | [ROUND3_GUIDE.md](ROUND3_GUIDE.md): route features | CV 0.96026, public 0.95999 |
 
 ## Reproducing the results
 
@@ -154,6 +192,7 @@ python scripts/01_first_look.py
 python scripts/02_baseline_model.py
 python scripts/03_check_submission.py
 python scripts/04_feature_experiments.py
+python scripts/05_route_features.py
 ```
 
 All randomness is seeded (`RANDOM_SEED = 42`) and library versions are pinned in

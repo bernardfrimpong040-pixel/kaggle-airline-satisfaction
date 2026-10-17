@@ -1,0 +1,38 @@
+,share_of_gain
+Online boarding,0.4593221528049104
+Type of Travel,0.10378988891706252
+Inflight wifi service,0.0998429072644532
+Class,0.0634121653957762
+Customer Type,0.033588887441963
+Inflight entertainment,0.03327433651299369
+vs_route_inflight_wifi_service,0.02963722877217545
+vs_route_online_boarding,0.01876959287213817
+Checkin service,0.017504374064727518
+Baggage handling,0.015478678017993778
+Seat comfort,0.014732723654974291
+On-board service,0.01343018253846119
+Age,0.011339477447936579
+route_mean_seat_comfort,0.00892158880694075
+Cleanliness,0.008209819623048542
+Ease of Online booking,0.007139343913064639
+Leg room service,0.006302802297754314
+Gate location,0.005419280119262441
+vs_route_inflight_entertainment,0.005036853299168324
+vs_route_seat_comfort,0.004904054801936445
+Departure/Arrival time convenient,0.004874382713523954
+route_mean_inflight_wifi_service,0.004306666549470984
+route_mean_inflight_entertainment,0.003382032036405663
+Flight Distance,0.0033673454758720058
+route_share_business_class,0.0032277421111524146
+route_mean_online_boarding,0.003085844878385384
+route_share_loyal,0.002617189833216878
+route_mean_age,0.0025063455343918234
+count_distance_and_class,0.002077109947536727
+count_distance_and_customer_type,0.0018290029556514201
+route_share_business_travel,0.001801071849571312
+count_distance_and_type_of_travel,0.0016307801208627418
+distance_count,0.0016034510608967972
+Arrival Delay in Minutes,0.0015852803186942141
+Food and drink,0.0009009504598825916
+Departure Delay in Minutes,0.0007001511393024031
+Gender,0.0004483144484412486

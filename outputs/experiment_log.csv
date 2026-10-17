@@ -5,3 +5,7 @@ date,experiment,rows_used,n_features,cv_auc,fold_std,public_lb,notes
 2026-10-17 09:17,v2c_plus_segment,699635,34,0.95856,0.00053,,baseline + rating_stats + delays + segment
 2026-10-17 09:18,v2d_plus_distance_count,699635,35,0.95916,0.00059,,baseline + rating_stats + delays + segment + distance_count
 2026-10-17 09:20,v2e_plus_ratings_as_cat,699635,35,0.95923,0.00061,,baseline + rating_stats + delays + segment + distance_count + ratings_as_categories
+2026-10-17 10:36,v3a_lean_base,699635,22,0.95947,0.00068,,raw + distance count + ratings as categories (lean base)
+2026-10-17 10:38,v3b_plus_pair_counts,699635,25,0.95961,0.00061,,raw + distance count + ratings as categories + pair_counts
+2026-10-17 10:39,v3c_plus_route_profile,699635,33,0.96026,0.0006,,raw + distance count + ratings as categories + pair_counts + route_profile
+2026-10-17 10:41,v3d_plus_route_residuals,699635,37,0.96014,0.00054,,raw + distance count + ratings as categories + pair_counts + route_profile + route_residuals
