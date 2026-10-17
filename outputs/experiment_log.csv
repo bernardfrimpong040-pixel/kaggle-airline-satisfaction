@@ -1,2 +1,7 @@
 date,experiment,rows_used,n_features,cv_auc,fold_std,public_lb,notes
 10/17/2026 8:21,baseline_lgbm,699635,21,0.95878,0.00058,0.95836,"LightGBM, raw features, native categories, early stopping"
+2026-10-17 09:13,v2a_rating_stats,699635,29,0.95861,0.00053,,baseline + rating_stats
+2026-10-17 09:15,v2b_plus_delays,699635,33,0.95846,0.00056,,baseline + rating_stats + delays
+2026-10-17 09:17,v2c_plus_segment,699635,34,0.95856,0.00053,,baseline + rating_stats + delays + segment
+2026-10-17 09:18,v2d_plus_distance_count,699635,35,0.95916,0.00059,,baseline + rating_stats + delays + segment + distance_count
+2026-10-17 09:20,v2e_plus_ratings_as_cat,699635,35,0.95923,0.00061,,baseline + rating_stats + delays + segment + distance_count + ratings_as_categories
