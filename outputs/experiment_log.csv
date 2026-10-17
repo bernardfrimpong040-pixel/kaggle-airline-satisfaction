@@ -9,3 +9,9 @@ date,experiment,rows_used,n_features,cv_auc,fold_std,public_lb,notes
 2026-10-17 10:38,v3b_plus_pair_counts,699635,25,0.95961,0.00061,,raw + distance count + ratings as categories + pair_counts
 2026-10-17 10:39,v3c_plus_route_profile,699635,33,0.96026,0.0006,,raw + distance count + ratings as categories + pair_counts + route_profile
 2026-10-17 10:41,v3d_plus_route_residuals,699635,37,0.96014,0.00054,,raw + distance count + ratings as categories + pair_counts + route_profile + route_residuals
+2026-10-17 13:29,v4_lightgbm,699635,33,0.96026,,,v3c features; lightgbm
+2026-10-17 13:29,v4_xgboost,699635,33,0.96025,,,v3c features; xgboost
+2026-10-17 13:29,v4_catboost,699635,33,0.96027,,,v3c features; catboost
+2026-10-17 13:29,v4_blend_average,699635,33,0.96063,,,v3c features; blend_average
+2026-10-17 13:29,v4_blend_rank_average,699635,33,0.96065,,,v3c features; blend_rank_average
+2026-10-17 13:29,v4_blend_weighted,699635,33,0.96065,,,"v3c features; blend_weighted (lightgbm 0.3, xgboost 0.3, catboost 0.4)"

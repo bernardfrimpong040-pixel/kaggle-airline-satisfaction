@@ -4,7 +4,7 @@
 - **Competition:** [Kaggle Playground Series, Season 6 Episode 10](https://www.kaggle.com/competitions/playground-series-s6e10), October 2026
 - **Task:** Binary classification. Predict the probability that a passenger is satisfied.
 - **Metric:** ROC AUC
-- **Tools:** Python, pandas, scikit-learn, LightGBM
+- **Tools:** Python, pandas, scikit-learn, LightGBM, XGBoost, CatBoost
 
 ## Results
 
@@ -20,6 +20,12 @@
 | v3b | + pair counts | 0.95961 ± 0.00061 | — | — |
 | **v3c** | **+ route profile** | **0.96026 ± 0.00060** | **0.95999** | **993 (17 Oct 2026)** |
 | v3d | + route residuals | 0.96014 ± 0.00054 | — | — |
+| v4 LightGBM | v3c features, LightGBM alone | 0.96026 | — | — |
+| v4 XGBoost | v3c features, XGBoost alone | 0.96025 | — | — |
+| v4 CatBoost | v3c features, CatBoost alone | 0.96027 | — | — |
+| v4 average | Average of the 3 models' probabilities | 0.96063 | — | — |
+| **v4 rank average** | **Average of the 3 models' ranks** | **0.96065** | **0.96025** | **945 (17 Oct 2026)** |
+| v4 weighted | Rank blend, weights 0.3 / 0.3 / 0.4 | 0.96065 | — | — |
 
 Only the best experiment of each round is uploaded to Kaggle; the others are judged on CV alone.
 
@@ -30,10 +36,11 @@ Only the best experiment of each round is uploaded to Kaggle; the others are jud
 | v1 baseline | 0.95878 | 0.95836 | 0.00042 |
 | v2e | 0.95923 | 0.95882 | 0.00041 |
 | v3c | 0.96026 | 0.95999 | 0.00027 |
-| **Total improvement** | **+0.00148** | **+0.00163** | |
+| v4 rank average | 0.96065 | 0.96025 | 0.00040 |
+| **Total improvement** | **+0.00187** | **+0.00189** | |
 
 CV predicted each round's gain closely (Round 2: +0.00045 CV vs +0.00046 public;
-Round 3: +0.00103 CV vs +0.00117 public), so the 5-fold cross-validation is a trustworthy
+Round 3: +0.00103 CV vs +0.00117 public; Round 4: +0.00039 CV vs +0.00026 public), so the 5-fold cross-validation is a trustworthy
 guide. Model decisions are made on CV, saving Kaggle submissions for real improvements.
 
 Public leaderboard ranks change daily as other teams submit, and the final ranking uses the
@@ -103,6 +110,22 @@ shows what that group contributed:
 - **Differences the model can compute itself did not help.** Route residuals are rating minus
   route average, and the model already had both, the same lesson as Round 2's summaries.
 
+## Round 4 findings
+
+| Model | CV AUC alone | Rank correlation with the others |
+|---|---:|---|
+| LightGBM | 0.96026 | 0.9816 (XGBoost), 0.9750 (CatBoost) |
+| XGBoost | 0.96025 | 0.9816 (LightGBM), 0.9749 (CatBoost) |
+| CatBoost | 0.96027 | 0.9750 (LightGBM), 0.9749 (XGBoost) |
+| **Rank-average blend** | **0.96065** | |
+
+- **The three models were equally good alone** (within 0.00002), but **the blend beat the best
+  single model by +0.00038**, because their mistakes only partly overlap.
+- **Diversity matters more than individual strength.** CatBoost was the most different model and
+  received the largest weight (0.4) in the weight search.
+- **The simple rank average matched the tuned weighted blend** (both 0.96065), so the simpler
+  option was submitted, since it has no weights that could be fitted to noise.
+
 ## Approach
 
 ### 1. Look before modelling (`scripts/01_first_look.py`)
@@ -148,6 +171,20 @@ None of them use the target, so they cannot leak it:
 | v3c | Route profile | Per route: share of Business class, business travel and loyal customers, mean age, and mean of the 4 strongest ratings |
 | v3d | Route residuals | Each passenger's rating minus the route average, e.g. "online boarding 1.5 points below usual for this route" |
 
+### 7. Round 4: three models and a blend (`scripts/06_model_blend.py`)
+Using the v3c features, three gradient-boosting libraries are trained on the same 5 folds:
+LightGBM, XGBoost and CatBoost. Each builds its trees differently, so their errors only partly
+overlap, and blending their predictions can cancel some of them out. Three blends are compared:
+
+| Blend | How it works |
+|---|---|
+| Average | Mean of the three models' probabilities |
+| Rank average | Mean of the three models' ranks. AUC depends only on order, so this avoids one model's probability scale dominating |
+| Weighted | Rank blend with weights (steps of 0.1, summing to 1) chosen on out-of-fold predictions; preferred only if clearly better, since weights chosen on the same data are slightly optimistic |
+
+Each model's out-of-fold and test predictions are saved as soon as it finishes, so an
+interrupted run resumes without retraining finished models.
+
 ## Project structure
 
 ```
@@ -163,12 +200,14 @@ kaggle-airline-satisfaction/
 │   ├── 02_baseline_model.py     # 5-fold CV LightGBM + submission file
 │   ├── 03_check_submission.py   # 7 checks before uploading
 │   ├── 04_feature_experiments.py # Round 2: 5 feature experiments
-│   └── 05_route_features.py     # Round 3: 4 route-feature experiments
+│   ├── 05_route_features.py     # Round 3: 4 route-feature experiments
+│   └── 06_model_blend.py        # Round 4: LightGBM + XGBoost + CatBoost blend
 ├── submissions/                 # files uploaded to Kaggle (not on GitHub)
 ├── requirements.txt             # pinned library versions
 ├── SETUP_STEP1.md               # Round 1 guide: setup, baseline, first upload
 ├── ROUND2_GUIDE.md              # Round 2 guide: feature experiments and results
-└── ROUND3_GUIDE.md              # Round 3 guide: route features and results
+├── ROUND3_GUIDE.md              # Round 3 guide: route features and results
+└── ROUND4_GUIDE.md              # Round 4 guide: three-model blend and results
 ```
 
 ## Step-by-step guides
@@ -180,6 +219,7 @@ Each round has its own guide with the steps, the results and what was learned:
 | 1 | [SETUP_STEP1.md](SETUP_STEP1.md): setup, data exploration, baseline model | CV 0.95878, public 0.95836 |
 | 2 | [ROUND2_GUIDE.md](ROUND2_GUIDE.md): feature engineering experiments | CV 0.95923, public 0.95882 |
 | 3 | [ROUND3_GUIDE.md](ROUND3_GUIDE.md): route features | CV 0.96026, public 0.95999 |
+| 4 | [ROUND4_GUIDE.md](ROUND4_GUIDE.md): three models and a blend | CV 0.96065, public 0.96025 |
 
 ## Reproducing the results
 
@@ -193,6 +233,7 @@ python scripts/02_baseline_model.py
 python scripts/03_check_submission.py
 python scripts/04_feature_experiments.py
 python scripts/05_route_features.py
+python scripts/06_model_blend.py
 ```
 
 All randomness is seeded (`RANDOM_SEED = 42`) and library versions are pinned in

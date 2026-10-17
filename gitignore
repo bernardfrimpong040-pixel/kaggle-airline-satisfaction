@@ -1,0 +1,13 @@
+# Kaggle's rules say we must not re-share the competition data, so the data
+# folder never goes to GitHub.
+data/
+
+# Python's virtual environment (big, and anyone can rebuild it)
+.venv/
+__pycache__/
+
+# Prediction files are large; we keep them on our own computer only
+submissions/*.csv
+outputs/oof_*.csv
+outputs/test_pred_*.csv
+catboost_info/
