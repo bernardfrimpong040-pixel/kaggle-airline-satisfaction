@@ -26,6 +26,10 @@
 | v4 average | Average of the 3 models' probabilities | 0.96063 | — | — |
 | **v4 rank average** | **Average of the 3 models' ranks** | **0.96065** | **0.96025** | **945 (17 Oct 2026)** |
 | v4 weighted | Rank blend, weights 0.3 / 0.3 / 0.4 | 0.96065 | — | — |
+| v5a | v3c + original-data route rates (LightGBM) | 0.96028 | — | — |
+| v5b | + original-data teacher (LightGBM) | 0.96046 | — | — |
+| v5 XGBoost | XGBoost on v5b features | 0.96053 | — | — |
+| **v5 blend** | **Rank average: v5b LightGBM + v5 XGBoost + Round 4 CatBoost** | **0.96090** | **0.96049** | **863 (17 Oct 2026)** |
 
 Only the best experiment of each round is uploaded to Kaggle; the others are judged on CV alone.
 
@@ -37,10 +41,11 @@ Only the best experiment of each round is uploaded to Kaggle; the others are jud
 | v2e | 0.95923 | 0.95882 | 0.00041 |
 | v3c | 0.96026 | 0.95999 | 0.00027 |
 | v4 rank average | 0.96065 | 0.96025 | 0.00040 |
-| **Total improvement** | **+0.00187** | **+0.00189** | |
+| v5 blend | 0.96090 | 0.96049 | 0.00041 |
+| **Total improvement** | **+0.00212** | **+0.00213** | |
 
 CV predicted each round's gain closely (Round 2: +0.00045 CV vs +0.00046 public;
-Round 3: +0.00103 CV vs +0.00117 public; Round 4: +0.00039 CV vs +0.00026 public), so the 5-fold cross-validation is a trustworthy
+Round 3: +0.00103 CV vs +0.00117 public; Round 4: +0.00039 CV vs +0.00026 public; Round 5: +0.00025 CV vs +0.00024 public), so the 5-fold cross-validation is a trustworthy
 guide. Model decisions are made on CV, saving Kaggle submissions for real improvements.
 
 Public leaderboard ranks change daily as other teams submit, and the final ranking uses the
@@ -125,6 +130,22 @@ shows what that group contributed:
   received the largest weight (0.4) in the weight search.
 - **The simple rank average matched the tuned weighted blend** (both 0.96065), so the simpler
   option was submitted, since it has no weights that could be fitted to noise.
+
+## Round 5 findings
+
+| Step | CV AUC | Change | Verdict |
+|---|---:|---:|---|
+| + original route rates | 0.96028 | +0.00002 | No real effect |
+| + original-data teacher | 0.96046 | +0.00018 | Real gain |
+| **Blend with Round 4 CatBoost** | **0.96090** | **+0.00025 vs Round 4 blend** | **New best** |
+
+- **Route rates from the original data added nothing**, because Round 3's route profile already
+  described each route.
+- **The teacher helped.** It scored 0.99480 on held-back real passengers but 0.95475 on the
+  generated ones: the real data is far cleaner. This is why appending real rows hurts, while the
+  teacher's prediction still adds knowledge.
+- **Models trained on different features blend better.** The Round 4 CatBoost (no teacher) was
+  less similar to the new models (0.966 vs about 0.975 before), so the blend gained more.
 
 ## Approach
 
@@ -236,7 +257,7 @@ Each round has its own guide with the steps, the results and what was learned:
 | 2 | [ROUND2_GUIDE.md](ROUND2_GUIDE.md): feature engineering experiments | CV 0.95923, public 0.95882 |
 | 3 | [ROUND3_GUIDE.md](ROUND3_GUIDE.md): route features | CV 0.96026, public 0.95999 |
 | 4 | [ROUND4_GUIDE.md](ROUND4_GUIDE.md): three models and a blend | CV 0.96065, public 0.96025 |
-| 5 | [ROUND5_GUIDE.md](ROUND5_GUIDE.md): features from the original dataset | in progress |
+| 5 | [ROUND5_GUIDE.md](ROUND5_GUIDE.md): features from the original dataset | CV 0.96090, public 0.96049 |
 
 ## Reproducing the results
 
