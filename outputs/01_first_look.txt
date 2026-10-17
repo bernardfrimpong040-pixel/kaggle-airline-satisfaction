@@ -1,0 +1,85 @@
+======================================================================
+1. SIZE OF THE DATA
+======================================================================
+Training rows (passengers WITH the answer):    699,635
+Test rows     (passengers WITHOUT the answer): 299,844
+Number of feature columns: 21
+
+======================================================================
+2. THE COLUMNS
+======================================================================
+Word (categorical) columns (4):
+   - Gender:  Female, Male
+   - Customer Type:  Loyal Customer, disloyal Customer
+   - Type of Travel:  Personal Travel, Business travel
+   - Class:  Eco, Business, Eco Plus
+Number columns (17):
+   - Age:  smallest 7, largest 85
+   - Flight Distance:  smallest 67, largest 4983
+   - Inflight wifi service:  smallest 0, largest 5
+   - Departure/Arrival time convenient:  smallest 0, largest 5
+   - Ease of Online booking:  smallest 0, largest 5
+   - Gate location:  smallest 0, largest 5
+   - Food and drink:  smallest 0, largest 5
+   - Online boarding:  smallest 0, largest 5
+   - Seat comfort:  smallest 0, largest 5
+   - Inflight entertainment:  smallest 0, largest 5
+   - On-board service:  smallest 0, largest 5
+   - Leg room service:  smallest 0, largest 5
+   - Baggage handling:  smallest 1, largest 5
+   - Checkin service:  smallest 0, largest 5
+   - Cleanliness:  smallest 0, largest 5
+   - Departure Delay in Minutes:  smallest 0, largest 489
+   - Arrival Delay in Minutes:  smallest 0.0, largest 491.0
+
+======================================================================
+3. MISSING VALUES (empty cells)
+======================================================================
+   - Arrival Delay in Minutes: 292 missing (0.042% of rows)
+
+======================================================================
+4. THE TARGET (what we predict)
+======================================================================
+Satisfied passengers: 44.4%
+Not satisfied:        55.6%
+Both groups are large, so the data is reasonably balanced.
+
+======================================================================
+5. SATISFACTION RATE BY GROUP
+======================================================================
+Gender:
+   Female                        43.8% satisfied   (347,952 passengers)
+   Male                          44.9% satisfied   (351,683 passengers)
+Customer Type:
+   Loyal Customer                49.5% satisfied   (576,990 passengers)
+   disloyal Customer             20.1% satisfied   (122,645 passengers)
+Type of Travel:
+   Business travel               58.4% satisfied   (497,441 passengers)
+   Personal Travel                9.7% satisfied   (202,194 passengers)
+Class:
+   Business                      72.5% satisfied   (342,212 passengers)
+   Eco                           16.8% satisfied   (327,404 passengers)
+   Eco Plus                      24.2% satisfied   (30,019 passengers)
+
+======================================================================
+6. STRENGTH OF EACH NUMBER COLUMN ON ITS OWN (single-column AUC)
+======================================================================
+   Online boarding                      0.840  ##################################
+   Inflight entertainment               0.745  ########################
+   Seat comfort                         0.732  #######################
+   On-board service                     0.699  ###################
+   Flight Distance                      0.696  ###################
+   Cleanliness                          0.689  ##################
+   Leg room service                     0.688  ##################
+   Inflight wifi service                0.663  ################
+   Baggage handling                     0.655  ###############
+   Checkin service                      0.636  #############
+   Age                                  0.624  ############
+   Food and drink                       0.621  ############
+   Ease of Online booking               0.609  ##########
+   Departure/Arrival time convenient    0.527  ##
+   Arrival Delay in Minutes             0.516  #
+   Gate location                        0.514  #
+   Departure Delay in Minutes           0.509  
+
+Saved this report to outputs/01_first_look.txt

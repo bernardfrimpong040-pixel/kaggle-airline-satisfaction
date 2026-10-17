@@ -1,0 +1,2 @@
+date,experiment,rows_used,n_features,cv_auc,fold_std,public_lb,notes
+10/17/2026 8:21,baseline_lgbm,699635,21,0.95878,0.00058,0.95836,"LightGBM, raw features, native categories, early stopping"
