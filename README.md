@@ -130,8 +130,18 @@ kaggle-airline-satisfaction/
 │   └── 04_feature_experiments.py # Round 2: 5 feature experiments
 ├── submissions/                 # files uploaded to Kaggle (not on GitHub)
 ├── requirements.txt             # pinned library versions
-└── SETUP_STEP1.md               # step-by-step setup guide
+├── SETUP_STEP1.md               # Round 1 guide: setup, baseline, first upload
+└── ROUND2_GUIDE.md              # Round 2 guide: feature experiments and results
 ```
+
+## Step-by-step guides
+
+Each round has its own guide with the steps, the results and what was learned:
+
+| Round | Guide | Result |
+|---|---|---|
+| 1 | [SETUP_STEP1.md](SETUP_STEP1.md): setup, data exploration, baseline model | CV 0.95878, public 0.95836 |
+| 2 | [ROUND2_GUIDE.md](ROUND2_GUIDE.md): feature engineering experiments | CV 0.95923, public 0.95882 |
 
 ## Reproducing the results
 
