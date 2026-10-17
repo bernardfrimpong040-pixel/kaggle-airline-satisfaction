@@ -10,7 +10,14 @@
 
 | Version | What changed | CV AUC | Public LB | Rank |
 |---|---|---:|---:|---:|
-| v1 | Baseline LightGBM, raw features | _fill in_ | 0.95836 | _fill in_ |
+| v1 | Baseline LightGBM, raw features | 0.95878 ± 0.00058 | 0.95836 | 1,361 (17 Oct 2026) |
+
+**Validation check:** CV AUC (0.95878) and public leaderboard (0.95836) differ by only 0.00042,
+well within 0.001, so the 5-fold cross-validation is a trustworthy guide. Model decisions are
+made on CV, saving Kaggle submissions for real improvements.
+
+Public leaderboard ranks change daily as other teams submit, and the final ranking uses the
+private leaderboard, revealed after the deadline (31 Oct 2026).
 
 Every run is recorded automatically in `outputs/experiment_log.csv`.
 
