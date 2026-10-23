@@ -30,6 +30,10 @@
 | v5b | + original-data teacher (LightGBM) | 0.96046 | — | — |
 | v5 XGBoost | XGBoost on v5b features | 0.96053 | — | — |
 | **v5 blend** | **Rank average: v5b LightGBM + v5 XGBoost + Round 4 CatBoost** | **0.96090** | **0.96049** | **863 (17 Oct 2026)** |
+| v6a | v5b + fold-safe target encoding (LightGBM) | 0.96062 | — | — |
+| v6 XGBoost | XGBoost on v6a features | 0.96072 | — | — |
+| v6 leaky demo | v6a with leaky encodings (**not real; never submitted**) | ~~0.96196~~ | — | — |
+| **v6 blend** | **Hill-climbing rank blend of 5 models** | **0.96107** | **0.96056** | **1,079 (22 Oct 2026)** |
 
 Only the best experiment of each round is uploaded to Kaggle; the others are judged on CV alone.
 
@@ -42,10 +46,11 @@ Only the best experiment of each round is uploaded to Kaggle; the others are jud
 | v3c | 0.96026 | 0.95999 | 0.00027 |
 | v4 rank average | 0.96065 | 0.96025 | 0.00040 |
 | v5 blend | 0.96090 | 0.96049 | 0.00041 |
-| **Total improvement** | **+0.00212** | **+0.00213** | |
+| v6 blend | 0.96107 | 0.96056 | 0.00051 |
+| **Total improvement** | **+0.00229** | **+0.00220** | |
 
 CV predicted each round's gain closely (Round 2: +0.00045 CV vs +0.00046 public;
-Round 3: +0.00103 CV vs +0.00117 public; Round 4: +0.00039 CV vs +0.00026 public; Round 5: +0.00025 CV vs +0.00024 public), so the 5-fold cross-validation is a trustworthy
+Round 3: +0.00103 CV vs +0.00117 public; Round 4: +0.00039 CV vs +0.00026 public; Round 5: +0.00025 CV vs +0.00024 public; Round 6: +0.00017 CV vs +0.00007 public), so the 5-fold cross-validation is a trustworthy
 guide. Model decisions are made on CV, saving Kaggle submissions for real improvements.
 
 Public leaderboard ranks change daily as other teams submit, and the final ranking uses the
@@ -147,6 +152,25 @@ shows what that group contributed:
 - **Models trained on different features blend better.** The Round 4 CatBoost (no teacher) was
   less similar to the new models (0.966 vs about 0.975 before), so the blend gained more.
 
+## Round 6 findings
+
+| Experiment | CV AUC | Note |
+|---|---:|---|
+| v5b LightGBM (reference) | 0.96046 | |
+| + fold-safe target encoding (LightGBM) | 0.96062 | +0.00016, real |
+| + fold-safe target encoding (XGBoost) | 0.96072 | best single model |
+| Leaky target encoding (demo) | 0.96196 | +0.00134 over honest, **fake** |
+| **Hill-climbing blend** | **0.96107** | public 0.96056 |
+
+- **Leakage looks like success.** The leaky encodings beat the honest ones on all 5 folds, by a
+  margin 8 times larger than the real gain. Nothing in the scores flags it; only checking *how*
+  the features were built does.
+- **Hill-climbing gains shrink fast:** the first two additions gave +0.00032, the next five only
+  +0.00003. Kaggle confirmed +0.00007 of the +0.00017 CV gain, and the CV–public gap widened to
+  0.00051, a sign that further gains are now close to the noise level.
+- **Public score improved but rank fell** (863 to 1,079) because other teams improved during
+  the 5 days between submissions.
+
 ## Approach
 
 ### 1. Look before modelling (`scripts/01_first_look.py`)
@@ -219,6 +243,20 @@ only to build features, from the original data's own labels, never the competiti
 The best Round 5 LightGBM is blended (rank average) with XGBoost on the same features and the
 saved Round 4 CatBoost predictions.
 
+### 9. Round 6: target encoding and a hill-climbing blend (`scripts/08_target_encoding.py`)
+Six groups (route, age, route × class, route × travel type, route × customer type, age × class)
+are target-encoded with scikit-learn's `TargetEncoder`, **inside each fold**: training rows are
+encoded with inner cross-fitting, and held-out and test rows only with statistics from the
+training folds. A deliberately leaky version (encodings learned from all training labels) is run
+as a demonstration of how leakage inflates CV, and is never submitted.
+
+The safe version was verified on practice data: flipping held-out labels left held-out and test
+encodings unchanged, and flipping a training row's own label left its own encoding unchanged
+(0 of 50 rows changed, with the inner split held fixed).
+
+A greedy hill-climbing blend (start from the best model, repeatedly add the model that most
+improves rank-blend CV, repeats allowed) then combines all saved models from Rounds 4–6.
+
 ## Project structure
 
 ```
@@ -237,14 +275,16 @@ kaggle-airline-satisfaction/
 │   ├── 04_feature_experiments.py # Round 2: 5 feature experiments
 │   ├── 05_route_features.py     # Round 3: 4 route-feature experiments
 │   ├── 06_model_blend.py        # Round 4: LightGBM + XGBoost + CatBoost blend
-│   └── 07_original_data.py      # Round 5: original-dataset features + blend
+│   ├── 07_original_data.py      # Round 5: original-dataset features + blend
+│   └── 08_target_encoding.py    # Round 6: fold-safe target encoding + hill-climbing blend
 ├── submissions/                 # files uploaded to Kaggle (not on GitHub)
 ├── requirements.txt             # pinned library versions
 ├── SETUP_STEP1.md               # Round 1 guide: setup, baseline, first upload
 ├── ROUND2_GUIDE.md              # Round 2 guide: feature experiments and results
 ├── ROUND3_GUIDE.md              # Round 3 guide: route features and results
 ├── ROUND4_GUIDE.md              # Round 4 guide: three-model blend and results
-└── ROUND5_GUIDE.md              # Round 5 guide: original-dataset features
+├── ROUND5_GUIDE.md              # Round 5 guide: original-dataset features
+└── ROUND6_GUIDE.md              # Round 6 guide: target encoding and leakage
 ```
 
 ## Step-by-step guides
@@ -258,6 +298,7 @@ Each round has its own guide with the steps, the results and what was learned:
 | 3 | [ROUND3_GUIDE.md](ROUND3_GUIDE.md): route features | CV 0.96026, public 0.95999 |
 | 4 | [ROUND4_GUIDE.md](ROUND4_GUIDE.md): three models and a blend | CV 0.96065, public 0.96025 |
 | 5 | [ROUND5_GUIDE.md](ROUND5_GUIDE.md): features from the original dataset | CV 0.96090, public 0.96049 |
+| 6 | [ROUND6_GUIDE.md](ROUND6_GUIDE.md): fold-safe target encoding, leakage demo, hill-climbing blend | CV 0.96107, public 0.96056 |
 
 ## Reproducing the results
 
@@ -274,6 +315,7 @@ python scripts/05_route_features.py
 python scripts/06_model_blend.py
 # put the original dataset's CSV files into data/original/ (see ROUND5_GUIDE.md)
 python scripts/07_original_data.py
+python scripts/08_target_encoding.py
 ```
 
 All randomness is seeded (`RANDOM_SEED = 42`) and library versions are pinned in

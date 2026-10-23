@@ -19,3 +19,6 @@ date,experiment,rows_used,n_features,cv_auc,fold_std,public_lb,notes
 2026-10-17 14:13,v5b_plus_teacher,699635,37,0.96046,0.00046,,v3c + original route rates + teacher
 2026-10-17 14:13,v5_xgboost,699635,37,0.96053,0.00052,,XGBoost on v5b_plus_teacher features
 2026-10-17 14:13,v5_blend_rank_average,699635,37,0.9609,,,rank average of lightgbm + xgboost + catboost (Round 4)
+2026-10-22 20:41,v6a_target_encoding,699635,43,0.96062,0.00056,,v5b features + fold-safe target encoding (LightGBM)
+2026-10-22 20:41,v6_xgboost,699635,43,0.96072,0.0005,,v5b features + fold-safe target encoding (XGBoost)
+2026-10-22 20:41,v6_hill_climb_blend,699635,43,0.96107,,,"hill-climbing rank blend: v6_xgboost 0.25, v4_catboost 0.25, v6a_target_encoding 0.25, v5_xgboost 0.12, v4_xgboost 0.12"

@@ -1,29 +1,38 @@
 # ============================================================================
-# ROUND 2: NEW FEATURES ("feature engineering")
-# Run with:   python scripts/04_feature_experiments.py
+# ROUND 6: TARGET ENCODING (DONE SAFELY) AND A HILL-CLIMBING BLEND
+# Run with:   python scripts/08_target_encoding.py
 #
-# WHAT IS A NEW FEATURE?
-#   A new column we build from the existing columns. Example: the AVERAGE of
-#   all 13 service ratings. The model could, in theory, work this out by
-#   itself, but handing it the answer directly often helps.
+# PART 1: TARGET ENCODING
+#   For each flight distance (route), what share of COMPETITION passengers
+#   were satisfied? That number is called a "target encoding", because it is
+#   built from the target (the satisfaction answers).
 #
-# HOW THIS SCRIPT TESTS THEM FAIRLY
-#   It runs 5 experiments. Each one ADDS one more group of features to the
-#   one before:
-#       v2a = baseline + rating summaries
-#       v2b = v2a + delay features
-#       v2c = v2b + passenger "segment"
-#       v2d = v2c + flight distance counts
-#       v2e = v2d + ratings treated as categories
-#   Everything else (folds, seed, model settings) stays EXACTLY the same as
-#   the baseline. So if the score changes, we know the features caused it.
-#   Scientists call this "changing one thing at a time".
+#   DANGER: if a passenger's own answer is used to build their own encoding,
+#   the model sees a hint of the answer. That's DATA LEAKAGE: the score looks
+#   great on our laptop but drops on Kaggle.
 #
-# HOW LONG: about 5-10 minutes PER experiment, so 30-50 minutes in total.
-#   You can leave it running. Set QUICK_TEST = True to check it works first.
+#   THE SAFE WAY (what we do):
+#     Inside each of our 5 folds:
+#       - the 4 training folds get encodings from an INNER split, so no
+#         passenger's own answer is ever used for their own value
+#         (scikit-learn's TargetEncoder does this for us with fit_transform)
+#       - the held-out fold and the test set get encodings learned ONLY from
+#         the 4 training folds (TargetEncoder.transform)
+#     So the held-out fold is never touched by its own answers. Honest score.
 #
-# AT THE END: a table comparing every experiment with your baseline (0.95878).
-#   Only upload the best one to Kaggle.
+#   THE LEAKY WAY (a DEMO, never uploaded):
+#     Learn the encodings once from ALL training answers, then cross-validate.
+#     Every held-out passenger's answer helped build their own encoding.
+#     Watch the CV score: it rises, but it's a lie. This is exactly the kind of
+#     flaw the North Hires job asks you to catch.
+#
+# PART 2: HILL-CLIMBING BLEND
+#   You now have many saved models (Rounds 4, 5 and 6). Instead of averaging
+#   a fixed three, we let the computer build the best mix:
+#     start with the best single model, then repeatedly add whichever model
+#     (repeats allowed) improves the blend's CV the most; stop when nothing helps.
+#
+# HOW LONG: about 10-15 minutes. Needs data\original\ (from Round 5).
 # ============================================================================
 
 import time
@@ -32,256 +41,441 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
-from sklearn.model_selection import StratifiedKFold
+import xgboost as xgb
+from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.preprocessing import TargetEncoder
 from sklearn.metrics import roc_auc_score
 
 from common import (load_data, find_feature_columns, make_categories_match,
-                    OUTPUT_DIR, SUBMISSION_DIR, TARGET, ID_COL)
+                    target_to_number, DATA_DIR, OUTPUT_DIR, SUBMISSION_DIR,
+                    TARGET, ID_COL)
 
 # ----------------------------------------------------------------------------
 # SETTINGS
 # ----------------------------------------------------------------------------
-N_FOLDS = 5             # same as baseline
-RANDOM_SEED = 42        # same as baseline, so the folds are identical
-QUICK_TEST = False      # True = use only 50,000 rows to test the script fast
-BASELINE_CV = 0.95878   # your Round 1 score, for comparison
+N_FOLDS = 5
+RANDOM_SEED = 42
+QUICK_TEST = False        # True = use only 50,000 rows to test the script fast
+RUN_LEAKY_DEMO = True     # False = skip the leakage demo (saves about 2 minutes)
+PREVIOUS_BEST = 0.96090   # your best CV so far (Round 5 blend)
+SMOOTHING = 20
+ORIGINAL_DIR = DATA_DIR / "original"
+MAX_BLEND_STEPS = 25      # the most models the hill-climbing blend may add
 
-# Same model settings as the baseline (do NOT change them in this round)
-MODEL_SETTINGS = {
-    "n_estimators": 3000,
-    "learning_rate": 0.05,
-    "num_leaves": 63,
-    "subsample": 0.8,
-    "subsample_freq": 1,
-    "colsample_bytree": 0.8,
-    "random_state": RANDOM_SEED,
-    "n_jobs": -1,
-    "verbose": -1,
+LGBM_SETTINGS = {
+    "n_estimators": 3000, "learning_rate": 0.05, "num_leaves": 63,
+    "subsample": 0.8, "subsample_freq": 1, "colsample_bytree": 0.8,
+    "random_state": RANDOM_SEED, "n_jobs": -1, "verbose": -1,
+}
+XGB_SETTINGS = {
+    "n_estimators": 3000, "learning_rate": 0.05, "max_depth": 8,
+    "subsample": 0.8, "colsample_bytree": 0.8, "tree_method": "hist",
+    "enable_categorical": True, "max_cat_to_onehot": 1,
+    "eval_metric": "auc", "early_stopping_rounds": 100,
+    "random_state": RANDOM_SEED, "n_jobs": -1,
 }
 
-# The 5 experiments: (name, list of feature groups switched on)
-EXPERIMENTS = [
-    ("v2a_rating_stats",        ["rating_stats"]),
-    ("v2b_plus_delays",         ["rating_stats", "delays"]),
-    ("v2c_plus_segment",        ["rating_stats", "delays", "segment"]),
-    ("v2d_plus_distance_count", ["rating_stats", "delays", "segment", "distance_count"]),
-    ("v2e_plus_ratings_as_cat", ["rating_stats", "delays", "segment", "distance_count",
-                                 "ratings_as_categories"]),
+DISTANCE = "Flight Distance"
+WORD_COLUMNS = ["Class", "Type of Travel", "Customer Type"]
+KEY_RATINGS = ["Online boarding", "Inflight entertainment", "Seat comfort", "Inflight wifi service"]
+
+# The groups we target-encode: (new column name, columns that define the group)
+TE_GROUPS = [
+    ("te_distance", ["Flight Distance"]),
+    ("te_age", ["Age"]),
+    ("te_distance_class", ["Flight Distance", "Class"]),
+    ("te_distance_travel", ["Flight Distance", "Type of Travel"]),
+    ("te_distance_customer", ["Flight Distance", "Customer Type"]),
+    ("te_age_class", ["Age", "Class"]),
 ]
 
-# Column names in the competition data (we check they exist before using them)
-DEP_DELAY = "Departure Delay in Minutes"
-ARR_DELAY = "Arrival Delay in Minutes"
-DISTANCE = "Flight Distance"
-DIGITAL_RATINGS = ["Online boarding", "Inflight wifi service", "Ease of Online booking"]
+# Saved models from earlier rounds that the blend may use: name -> where its
+# out-of-fold predictions and test predictions are saved
+EARLIER_MODELS = {
+    "v4_lightgbm": ("oof_v4_lightgbm.csv", "test_pred_v4_lightgbm.csv"),
+    "v4_xgboost": ("oof_v4_xgboost.csv", "test_pred_v4_xgboost.csv"),
+    "v4_catboost": ("oof_v4_catboost.csv", "test_pred_v4_catboost.csv"),
+    "v5b_plus_teacher": ("oof_v5b_plus_teacher.csv", "submission_v5b_plus_teacher.csv"),
+    "v5_xgboost": ("oof_v5_xgboost.csv", "submission_v5_xgboost.csv"),
+}
 
 
 # ============================================================================
-# PART A: THE FEATURE GROUPS
-# Each function takes a table and adds new columns to it.
+# PART A: FEATURES FROM ROUNDS 3 AND 5 (copied, unchanged)
 # ============================================================================
+
+def short(name):
+    return name.lower().replace(" ", "_")
+
 
 def find_rating_columns(table, numeric_cols):
-    """The service ratings are the number columns whose values only go from 0 to 5."""
     return [c for c in numeric_cols if table[c].min() >= 0 and table[c].max() <= 5]
 
 
-def add_rating_stats(table, rating_cols):
-    """Summaries of each passenger's 13 ratings."""
-    ratings = table[rating_cols]
+def build_v3c_features(raw_train, raw_test):
+    n_train = len(raw_train)
+    target = raw_train[TARGET].values
+    everyone = pd.concat([raw_train.drop(columns=[TARGET]), raw_test], ignore_index=True)
 
-    # In this survey a 0 means "not answered", not "terrible".
-    # So for averages we hide the 0s (turn them into empty cells).
-    answered = ratings.replace(0, np.nan)
+    _, _, numeric = find_feature_columns(raw_train)
+    rating_cols = find_rating_columns(raw_train, numeric)
 
-    table["rating_mean"] = answered.mean(axis=1)      # axis=1 means "across the row"
-    table["rating_min"] = answered.min(axis=1)        # their worst score
-    table["rating_max"] = answered.max(axis=1)        # their best score
-    table["rating_spread"] = answered.std(axis=1)     # how much their scores vary
-    table["n_not_answered"] = (ratings == 0).sum(axis=1)
-    table["n_top_marks"] = (ratings == 5).sum(axis=1)
-    table["n_low_marks"] = ratings.isin([1, 2]).sum(axis=1)
+    everyone["distance_count"] = everyone.groupby(DISTANCE)[DISTANCE].transform("size")
+    for col in WORD_COLUMNS:
+        if col in everyone.columns:
+            everyone["count_distance_and_" + short(col)] = (
+                everyone.groupby([DISTANCE, col])[DISTANCE].transform("size"))
+    shares = {
+        "route_share_business_class": ("Class", "Business"),
+        "route_share_business_travel": ("Type of Travel", "Business travel"),
+        "route_share_loyal": ("Customer Type", "Loyal Customer"),
+    }
+    for new_name, (col, value) in shares.items():
+        if col in everyone.columns:
+            is_value = (everyone[col].astype(str) == value).astype(float)
+            everyone[new_name] = is_value.groupby(everyone[DISTANCE]).transform("mean")
+    if "Age" in everyone.columns:
+        everyone["route_mean_age"] = everyone.groupby(DISTANCE)["Age"].transform("mean")
+    for rating in KEY_RATINGS:
+        if rating in everyone.columns:
+            answered = everyone[rating].replace(0, np.nan)
+            everyone["route_mean_" + short(rating)] = (
+                answered.groupby(everyone[DISTANCE]).transform("mean"))
 
-    # Your first-look report showed Online boarding was the strongest column,
-    # so we also average the three "digital experience" ratings.
-    digital = [c for c in DIGITAL_RATINGS if c in table.columns]
-    if digital:
-        table["digital_mean"] = table[digital].replace(0, np.nan).mean(axis=1)
-    return table
+    train = everyone.iloc[:n_train].copy()
+    test = everyone.iloc[n_train:].copy()
+    train[TARGET] = target
 
-
-def add_delay_features(table):
-    """Delays on their own were weak (AUC 0.509). Combinations might do better."""
-    if DEP_DELAY not in table.columns or ARR_DELAY not in table.columns:
-        print("   (delay columns not found, skipping delay features)")
-        return table
-
-    departure = table[DEP_DELAY]
-    # Fill the 292 missing arrival delays with the departure delay (a sensible guess)
-    arrival = table[ARR_DELAY].fillna(departure)
-
-    table["total_delay"] = departure + arrival
-    table["delay_made_up"] = departure - arrival       # positive = the plane caught up
-    table["late_over_15min"] = (arrival > 15).astype(int)
-    if DISTANCE in table.columns:
-        # A 60-minute delay feels worse on a short flight than on a long one
-        table["delay_per_1000_miles"] = arrival / (table[DISTANCE] / 1000)
-    return table
-
-
-def add_segment(table):
-    """
-    Combine Class + Type of Travel + Customer Type into one 'segment' column,
-    e.g. "Eco | Personal Travel | Loyal Customer".
-    Your report showed these three matter a lot; together they may matter more.
-    """
-    parts = [c for c in ["Class", "Type of Travel", "Customer Type"] if c in table.columns]
-    if len(parts) < 2:
-        print("   (segment columns not found, skipping)")
-        return table
-    table["segment"] = table[parts].astype(str).agg(" | ".join, axis=1)
-    return table
-
-
-def add_distance_count(train, test):
-    """
-    How many passengers (in train AND test together) share the exact same
-    flight distance. The same distance usually means the same route, so this
-    tells the model how common or rare a route is.
-    This uses NO satisfaction answers, so it cannot leak the target.
-    """
-    if DISTANCE not in train.columns:
-        print("   (flight distance not found, skipping)")
-        return train, test
-    counts = pd.concat([train[DISTANCE], test[DISTANCE]]).value_counts()
-    train["distance_count"] = train[DISTANCE].map(counts)
-    test["distance_count"] = test[DISTANCE].map(counts)
-    return train, test
-
-
-def build_features(raw_train, raw_test, groups):
-    """Start from fresh copies of the data and add the chosen feature groups."""
-    train = raw_train.copy()     # .copy() so we never change the original data
-    test = raw_test.copy()
-
-    _, _, numeric = find_feature_columns(train)
-    rating_cols = find_rating_columns(train, numeric)
-
-    if "rating_stats" in groups:
-        train = add_rating_stats(train, rating_cols)
-        test = add_rating_stats(test, rating_cols)
-    if "delays" in groups:
-        train = add_delay_features(train)
-        test = add_delay_features(test)
-    if "segment" in groups:
-        train = add_segment(train)
-        test = add_segment(test)
-    if "distance_count" in groups:
-        train, test = add_distance_count(train, test)
-
-    # Now sort all columns (old + new) into word columns and number columns
     features, categorical, _ = find_feature_columns(train)
-
-    # Optional: treat each rating (0-5) as a category instead of a number.
-    # Then the model can treat "0 = not answered" as its own thing, rather
-    # than as "one less than 1".
-    if "ratings_as_categories" in groups:
-        categorical = categorical + rating_cols
-
+    categorical = categorical + rating_cols
     train, test = make_categories_match(train, test, categorical)
-    return train, test, features
+    return train, test, features, rating_cols
+
+
+def load_original(competition_features):
+    files = sorted(ORIGINAL_DIR.glob("*.csv"))
+    if not files:
+        raise SystemExit(f"\nI can't find any CSV files in {ORIGINAL_DIR}\n"
+                         "This round needs the original dataset from Round 5 (see ROUND5_GUIDE.md).")
+    original = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+    original[TARGET] = target_to_number(original[TARGET])
+    keep = [c for c in competition_features if c in original.columns]
+    print(f"Original data: {len(original):,} passengers")
+    return original[keep + [TARGET]]
+
+
+def add_original_route_rates(train, test, original):
+    overall = original[TARGET].mean()
+
+    def smoothed_rate(group_cols):
+        stats = original.groupby(group_cols)[TARGET].agg(["sum", "count"])
+        return (stats["sum"] + SMOOTHING * overall) / (stats["count"] + SMOOTHING), stats["count"]
+
+    route_rate, route_count = smoothed_rate([DISTANCE])
+    for table in (train, test):
+        table["orig_route_rate"] = table[DISTANCE].map(route_rate).fillna(overall)
+        table["orig_route_count"] = table[DISTANCE].map(route_count).fillna(0)
+    if "Class" in original.columns:
+        pair_rate, _ = smoothed_rate([DISTANCE, "Class"])
+        pair_rate = pair_rate.rename("orig_route_class_rate").reset_index()
+        pair_rate["Class"] = pair_rate["Class"].astype(str)
+        for table in (train, test):
+            lookup = pd.DataFrame({DISTANCE: table[DISTANCE].values,
+                                   "Class": table["Class"].astype(str).values})
+            table["orig_route_class_rate"] = (
+                lookup.merge(pair_rate, on=[DISTANCE, "Class"], how="left")
+                ["orig_route_class_rate"].fillna(overall).values)
+    return ["orig_route_rate", "orig_route_count", "orig_route_class_rate"]
+
+
+def same_categories(tables, columns):
+    for col in columns:
+        values = sorted(pd.concat([t[col].astype(str).where(t[col].notna()) for t in tables])
+                        .dropna().unique())
+        kind = pd.CategoricalDtype(categories=values)
+        for t in tables:
+            t[col] = t[col].astype(str).where(t[col].notna()).astype(kind)
+
+
+def add_teacher(train, test, original, raw_features, categorical_raw):
+    orig = original.copy()
+    tr = train[raw_features].copy()
+    te = test[raw_features].copy()
+    same_categories([orig, tr, te], [c for c in categorical_raw if c in orig.columns])
+    cols = [c for c in raw_features if c in orig.columns]
+    fit_rows, stop_rows = train_test_split(orig, test_size=0.1, stratify=orig[TARGET],
+                                           random_state=RANDOM_SEED)
+    teacher = lgb.LGBMClassifier(**LGBM_SETTINGS)
+    teacher.fit(fit_rows[cols], fit_rows[TARGET],
+                eval_X=stop_rows[cols], eval_y=stop_rows[TARGET], eval_metric="auc",
+                callbacks=[lgb.early_stopping(100, verbose=False)])
+    train["orig_teacher"] = teacher.predict_proba(tr[cols])[:, 1]
+    test["orig_teacher"] = teacher.predict_proba(te[cols])[:, 1]
+    return ["orig_teacher"]
 
 
 # ============================================================================
-# PART B: CROSS-VALIDATION (the same method as 02_baseline_model.py)
+# PART B: TARGET ENCODING
 # ============================================================================
 
-def run_cross_validation(train, test, features):
+def make_group_keys(raw_table):
+    """
+    One text column per group, e.g. "1235|Business" for distance 1235 in
+    Business class. TargetEncoder treats each different text as one group.
+    """
+    keys = pd.DataFrame(index=range(len(raw_table)))
+    for new_name, cols in TE_GROUPS:
+        keys[new_name] = raw_table[cols].astype(str).agg("|".join, axis=1).values
+    return keys
+
+
+def honest_encodings(keys, keys_test, y, folds):
+    """
+    The SAFE way. For each outer fold, returns the encodings for its training
+    rows, its held-out rows and the test set, never using a held-out answer.
+    """
+    names = [n for n, _ in TE_GROUPS]
+    per_fold = []
+    for tr_rows, va_rows in folds:
+        encoder = TargetEncoder(
+            target_type="binary",
+            cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_SEED))
+        # fit_transform = learn from the 4 training folds, with an INNER split
+        # so no training passenger's own answer builds their own value
+        tr_enc = encoder.fit_transform(keys.iloc[tr_rows], y[tr_rows])
+        # transform = apply what was learned to rows it did NOT learn from
+        va_enc = encoder.transform(keys.iloc[va_rows])
+        te_enc = encoder.transform(keys_test)
+        per_fold.append((pd.DataFrame(tr_enc, columns=names),
+                         pd.DataFrame(va_enc, columns=names),
+                         pd.DataFrame(te_enc, columns=names)))
+    return per_fold
+
+
+def leaky_encodings(keys, keys_test, y, folds):
+    """
+    The WRONG way, for the demo only. Learn from ALL training answers at once,
+    then hand those values to every fold. Held-out passengers' own answers
+    went into their own encodings.
+    """
+    names = [n for n, _ in TE_GROUPS]
+    encoder = TargetEncoder(target_type="binary")
+    encoder.fit(keys, y)                     # learns from every answer...
+    all_enc = pd.DataFrame(encoder.transform(keys), columns=names)   # ...then reuses them
+    te_enc = pd.DataFrame(encoder.transform(keys_test), columns=names)
+    return [(all_enc.iloc[tr].reset_index(drop=True), all_enc.iloc[va].reset_index(drop=True), te_enc)
+            for tr, va in folds]
+
+
+# ============================================================================
+# PART C: CROSS-VALIDATION WITH PER-FOLD ENCODINGS
+# ============================================================================
+
+def run_cv(model_name, train, test, features, folds, encodings=None):
     X, y, X_test = train[features], train[TARGET], test[features]
-    folds = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_SEED)
+    oof, test_pred, scores = np.zeros(len(train)), np.zeros(len(test)), []
 
-    oof_predictions = np.zeros(len(train))
-    test_predictions = np.zeros(len(test))
-    fold_scores = []
+    for fold_number, (tr_rows, va_rows) in enumerate(folds, start=1):
+        X_tr = X.iloc[tr_rows].reset_index(drop=True)
+        X_va = X.iloc[va_rows].reset_index(drop=True)
+        X_te = X_test.reset_index(drop=True)
+        if encodings is not None:
+            tr_enc, va_enc, te_enc = encodings[fold_number - 1]
+            # Glue the encoding columns onto the right of the other features
+            X_tr = pd.concat([X_tr, tr_enc], axis=1)
+            X_va = pd.concat([X_va, va_enc], axis=1)
+            X_te = pd.concat([X_te, te_enc], axis=1)
+        y_tr, y_va = y.iloc[tr_rows].values, y.iloc[va_rows].values
 
-    for fold_number, (train_rows, valid_rows) in enumerate(folds.split(X, y), start=1):
-        model = lgb.LGBMClassifier(**MODEL_SETTINGS)
-        model.fit(
-            X.iloc[train_rows], y.iloc[train_rows],
-            eval_X=X.iloc[valid_rows], eval_y=y.iloc[valid_rows],
-            eval_metric="auc",
-            callbacks=[lgb.early_stopping(100, verbose=False)],
-        )
-        valid_pred = model.predict_proba(X.iloc[valid_rows])[:, 1]
-        oof_predictions[valid_rows] = valid_pred
-        fold_scores.append(roc_auc_score(y.iloc[valid_rows], valid_pred))
-        test_predictions += model.predict_proba(X_test)[:, 1] / N_FOLDS
-        print(f"   fold {fold_number}: AUC {fold_scores[-1]:.5f}  ({model.best_iteration_} trees)")
+        if model_name == "lightgbm":
+            model = lgb.LGBMClassifier(**LGBM_SETTINGS)
+            model.fit(X_tr, y_tr, eval_X=X_va, eval_y=y_va, eval_metric="auc",
+                      callbacks=[lgb.early_stopping(100, verbose=False)])
+            n_trees = model.best_iteration_
+        else:
+            model = xgb.XGBClassifier(**XGB_SETTINGS)
+            model.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], verbose=False)
+            n_trees = model.best_iteration + 1
+        oof[va_rows] = model.predict_proba(X_va)[:, 1]
+        test_pred += model.predict_proba(X_te)[:, 1] / N_FOLDS
+        scores.append(roc_auc_score(y_va, oof[va_rows]))
+        print(f"   fold {fold_number}: AUC {scores[-1]:.5f}  ({n_trees} trees)")
 
-    importance = pd.Series(model.booster_.feature_importance("gain"), index=features)
-    importance = (importance / importance.sum()).sort_values(ascending=False)
-
-    cv_score = roc_auc_score(y, oof_predictions)
-    return cv_score, np.std(fold_scores), oof_predictions, test_predictions, importance
+    cv = roc_auc_score(y, oof)
+    print(f"   CV AUC {cv:.5f}")
+    return cv, np.std(scores), oof, test_pred
 
 
 # ============================================================================
-# PART C: RUN ALL EXPERIMENTS
+# PART D: HILL-CLIMBING BLEND
+# ============================================================================
+
+def to_ranks(values):
+    return pd.Series(values).rank(pct=True).values
+
+
+def load_earlier_models(train, test):
+    """Load saved predictions from earlier rounds, if they match this data."""
+    found = {}
+    for name, (oof_file, test_file) in EARLIER_MODELS.items():
+        oof_path = OUTPUT_DIR / oof_file
+        test_path = (OUTPUT_DIR / test_file if test_file.startswith("test_pred")
+                     else SUBMISSION_DIR / test_file)
+        if not (oof_path.exists() and test_path.exists()):
+            print(f"   {name}: not found, skipping")
+            continue
+        oof_table, test_table = pd.read_csv(oof_path), pd.read_csv(test_path)
+        if (oof_table[ID_COL].tolist() != train[ID_COL].tolist()
+                or test_table[ID_COL].tolist() != test[ID_COL].tolist()):
+            print(f"   {name}: saved file doesn't match this data, skipping")
+            continue
+        test_values = test_table["pred"] if "pred" in test_table else test_table[TARGET]
+        found[name] = (oof_table["oof"].values, test_values.values)
+        print(f"   {name}: loaded (CV AUC {roc_auc_score(train[TARGET], found[name][0]):.5f})")
+    return found
+
+
+def hill_climb(models, y):
+    """
+    Start with the best single model. Each step, try adding every model
+    (repeats allowed) and keep the one that raises the blend's CV the most.
+    Stop when no model helps. Returns how many times each model was picked.
+    """
+    ranked = {name: to_ranks(oof) for name, (oof, _) in models.items()}
+    best_start = max(ranked, key=lambda n: roc_auc_score(y, ranked[n]))
+    picks = [best_start]
+    total = ranked[best_start].copy()
+    best_score = roc_auc_score(y, total)
+    print(f"   start: {best_start} ({best_score:.5f})")
+
+    for step in range(1, MAX_BLEND_STEPS + 1):
+        trial = {name: roc_auc_score(y, (total + r) / (len(picks) + 1))
+                 for name, r in ranked.items()}
+        name = max(trial, key=trial.get)
+        if trial[name] <= best_score + 1e-6:
+            print("   no model improves the blend any more; stopping")
+            break
+        picks.append(name)
+        total += ranked[name]
+        best_score = trial[name]
+        print(f"   step {step}: add {name:<22} blend CV {best_score:.5f}")
+
+    counts = pd.Series(picks).value_counts()
+    weights = (counts / counts.sum()).to_dict()
+    return weights, best_score
+
+
+# ============================================================================
+# PART E: RUN EVERYTHING
 # ============================================================================
 
 start_time = time.time()
 raw_train, raw_test = load_data()
 if QUICK_TEST:
-    raw_train = raw_train.sample(50_000, random_state=RANDOM_SEED)
+    raw_train = raw_train.sample(50_000, random_state=RANDOM_SEED).reset_index(drop=True)
     print("QUICK_TEST is on: using 50,000 rows only. Scores will be lower.")
+
+raw_features, raw_categorical, _ = find_feature_columns(raw_train)
+original = load_original(raw_features)
+
+# Group keys are made from the RAW values (before the category conversion)
+keys = make_group_keys(raw_train)
+keys_test = make_group_keys(raw_test)
+
+train, test, v3c_features, rating_cols = build_v3c_features(raw_train, raw_test)
+rate_cols = add_original_route_rates(train, test, original)
+teacher_cols = add_teacher(train, test, original, raw_features, raw_categorical + rating_cols)
+v5b_features = v3c_features + rate_cols + teacher_cols
+y = train[TARGET].values
+
+splitter = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_SEED)
+folds = list(splitter.split(train[v5b_features], y))   # the same folds as every round
+
+print("\nBuilding the target encodings inside each fold (the safe way)...")
+safe_enc = honest_encodings(keys, keys_test, y, folds)
 
 OUTPUT_DIR.mkdir(exist_ok=True)
 SUBMISSION_DIR.mkdir(exist_ok=True)
-log_path = OUTPUT_DIR / "experiment_log.csv"
-results = []
+results = {}
 
-for name, groups in EXPERIMENTS:
-    print(f"\n=== {name}: {', '.join(groups)} ===")
-    train, test, features = build_features(raw_train, raw_test, groups)
-    print(f"   {len(features)} features")
+print(f"\n=== v6a_target_encoding (LightGBM, {len(v5b_features) + len(TE_GROUPS)} features) ===")
+results["v6a_target_encoding"] = run_cv("lightgbm", train, test, v5b_features, folds, safe_enc)
 
-    cv, spread, oof, test_pred, importance = run_cross_validation(train, test, features)
-    gain = cv - BASELINE_CV
-    print(f"   CV AUC {cv:.5f}   (change vs baseline: {gain:+.5f})")
-    results.append((name, len(features), cv, spread, gain))
+print(f"\n=== v6_xgboost (XGBoost, same features) ===")
+results["v6_xgboost"] = run_cv("xgboost", train, test, v5b_features, folds, safe_enc)
 
-    # Save this experiment's submission, out-of-fold predictions and importance
+leaky_cv = None
+if RUN_LEAKY_DEMO:
+    print("\n=== LEAKAGE DEMO: the same LightGBM, but encodings learned the WRONG way ===")
+    leaky = run_cv("lightgbm", train, test, v5b_features, folds,
+                   leaky_encodings(keys, keys_test, y, folds))
+    leaky_cv = leaky[0]
+
+# Save this round's models
+for name, (cv, spread, oof, test_pred) in results.items():
     pd.DataFrame({ID_COL: test[ID_COL], TARGET: test_pred}).to_csv(
         SUBMISSION_DIR / f"submission_{name}.csv", index=False)
-    pd.DataFrame({ID_COL: train[ID_COL], "oof": oof}).to_csv(
-        OUTPUT_DIR / f"oof_{name}.csv", index=False)
-    importance.rename("share_of_gain").to_csv(OUTPUT_DIR / f"importance_{name}.csv")
+    if not QUICK_TEST:
+        pd.DataFrame({ID_COL: train[ID_COL], "oof": oof}).to_csv(
+            OUTPUT_DIR / f"oof_{name}.csv", index=False)
 
-    # Add a line to the experiment log
+# ----------------------------------------------------------------------------
+# Hill-climbing blend over every model we have
+# ----------------------------------------------------------------------------
+print("\nLoading saved models from earlier rounds...")
+blend_models = {} if QUICK_TEST else load_earlier_models(train, test)
+if QUICK_TEST:
+    print("   (quick test: earlier models are for the full data, so they're skipped)")
+for name, (cv, spread, oof, test_pred) in results.items():
+    blend_models[name] = (oof, test_pred)
+
+print("\nHill-climbing blend:")
+weights, blend_cv = hill_climb(blend_models, y)
+blend_test = sum(w * to_ranks(blend_models[n][1]) for n, w in weights.items())
+blend_oof = sum(w * to_ranks(blend_models[n][0]) for n, w in weights.items())
+weight_text = ", ".join(f"{n} {w:.2f}" for n, w in sorted(weights.items(), key=lambda kv: -kv[1]))
+results["v6_hill_climb_blend"] = (roc_auc_score(y, blend_oof), 0, blend_oof, blend_test)
+pd.DataFrame({ID_COL: test[ID_COL], TARGET: blend_test}).to_csv(
+    SUBMISSION_DIR / "submission_v6_hill_climb_blend.csv", index=False)
+
+# Log everything
+log_path = OUTPUT_DIR / "experiment_log.csv"
+notes = {
+    "v6a_target_encoding": "v5b features + fold-safe target encoding (LightGBM)",
+    "v6_xgboost": "v5b features + fold-safe target encoding (XGBoost)",
+    "v6_hill_climb_blend": "hill-climbing rank blend: " + weight_text,
+}
+for name, (cv, spread, _, _) in results.items():
     pd.DataFrame([{
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "experiment": name,
-        "rows_used": len(train),
-        "n_features": len(features),
-        "cv_auc": round(cv, 5),
-        "fold_std": round(spread, 5),
-        "public_lb": "",
-        "notes": "baseline + " + " + ".join(groups),
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M"), "experiment": name,
+        "rows_used": len(train), "n_features": len(v5b_features) + len(TE_GROUPS),
+        "cv_auc": round(cv, 5), "fold_std": round(spread, 5) if spread else "",
+        "public_lb": "", "notes": notes[name],
     }]).to_csv(log_path, mode="a", header=not log_path.exists(), index=False)
 
 # ----------------------------------------------------------------------------
-# Summary table
+# Summary
 # ----------------------------------------------------------------------------
 print("\n" + "=" * 72)
-print("ROUND 2 SUMMARY (each row adds one more feature group)")
+print("ROUND 6 SUMMARY")
 print("=" * 72)
-print(f"{'experiment':<26}{'features':>9}{'CV AUC':>10}{'± folds':>10}{'vs baseline':>13}")
-print(f"{'baseline (Round 1)':<26}{21:>9}{BASELINE_CV:>10.5f}{'':>10}{'':>13}")
-for name, n, cv, spread, gain in results:
-    print(f"{name:<26}{n:>9}{cv:>10.5f}{spread:>10.5f}{gain:>+13.5f}")
+print(f"{'experiment':<26}{'CV AUC':>10}{'vs Round 5 blend (0.96090)':>30}")
+print(f"{'v5b LightGBM (reference)':<26}{0.96046:>10.5f}{0.96046 - PREVIOUS_BEST:>+30.5f}")
+for name, (cv, *_rest) in results.items():
+    print(f"{name:<26}{cv:>10.5f}{cv - PREVIOUS_BEST:>+30.5f}")
+print(f"\nBlend weights: {weight_text}")
 
-best = max(results, key=lambda row: row[2])
-print(f"\nBest experiment: {best[0]} (CV AUC {best[2]:.5f})")
-print(f"Upload: submissions/submission_{best[0]}.csv  (check it first with 03_check_submission.py)")
-print("\nRule of thumb: a change smaller than the '± folds' number may just be luck.")
+if leaky_cv is not None:
+    honest_cv = results["v6a_target_encoding"][0]
+    print("\nLEAKAGE DEMO (same model, same features, only the encoding method differs):")
+    print(f"   honest encodings  CV AUC {honest_cv:.5f}")
+    print(f"   leaky encodings   CV AUC {leaky_cv:.5f}   ({leaky_cv - honest_cv:+.5f})")
+    print("   The leaky score is NOT real. Never upload it; it would score worse on Kaggle.")
+
+best_name = max(results, key=lambda n: results[n][0])
+best_cv = results[best_name][0]
+if best_cv > PREVIOUS_BEST:
+    print(f"\nRECOMMENDED UPLOAD: submissions/submission_{best_name}.csv  (CV AUC {best_cv:.5f})")
+else:
+    print(f"\nNothing beat your Round 5 blend ({PREVIOUS_BEST}). Don't upload; your Round 5 file is still your best.")
 print(f"Finished in {(time.time() - start_time) / 60:.1f} minutes.")
